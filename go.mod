@@ -1,4 +1,4 @@
-module go-http-digest
+module github.com/jpfielding/go-http-digest
 
 go 1.16
 
