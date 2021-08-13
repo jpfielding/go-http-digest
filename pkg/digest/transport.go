@@ -6,8 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"encoding/hex"
 	"errors"
-	"fmt"
 	"hash"
 	"io"
 	"io/ioutil"
@@ -30,12 +30,12 @@ var (
 	ErrQopNotSupported   = errors.New("qop not supported")
 
 	// The Algs supported by this digester
-	Algs = map[string]hash.Hash{
-		"":            md5.New(),
-		"MD5":         md5.New(),
-		"SHA-256":     sha256.New(),
-		"SHA-512":     sha512.New(),
-		"SHA-512-256": sha512.New512_256(),
+	Algs = map[string]func() hash.Hash{
+		"":            md5.New,
+		"MD5":         md5.New,
+		"SHA-256":     sha256.New,
+		"SHA-512":     sha512.New,
+		"SHA-512-256": sha512.New512_256,
 	}
 	QopFirst = func(qops []string) string {
 		for _, qop := range qops {
@@ -46,7 +46,7 @@ var (
 	Cnoncer16 = func() string {
 		b := make([]byte, 16)
 		io.ReadFull(rand.Reader, b)
-		return fmt.Sprintf("%x", b)[:32]
+		return hex.EncodeToString(b)
 	}
 )
 

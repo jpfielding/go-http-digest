@@ -34,9 +34,9 @@ type Credentials struct {
 type Hasher func(string) string
 
 func (c *Credentials) Hasher() Hasher {
-	alg := strings.ToUpper(strings.TrimSuffix(c.Algorithm, "-sess"))
-	h := Algs[alg]
 	return func(data string) string {
+		alg := strings.ToUpper(strings.TrimSuffix(c.Algorithm, "-sess"))
+		h := Algs[alg]() // create the hash.Hash to avoid sharing
 		h.Reset()
 		fmt.Fprint(h, data)
 		return hex.EncodeToString(h.Sum(nil))

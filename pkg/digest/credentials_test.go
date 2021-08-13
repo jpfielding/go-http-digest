@@ -1,4 +1,3 @@
-// https://datatracker.ietf.org/doc/html/rfc7616
 package digest
 
 import (
@@ -6,6 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 )
+
+// examples/responses taken directly from
+// https://datatracker.ietf.org/doc/html/rfc7616
 
 func TestResponse(t *testing.T) {
 	var responses = map[string]string{
