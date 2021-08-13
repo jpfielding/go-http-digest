@@ -19,7 +19,7 @@ type Challenge struct {
 	Userhash  string
 }
 
-// the regex will only pull (k="v"|k=v) 
+// the regex will only pull (k="v"|k=v)
 var reWwwAuth = regexp.MustCompile(`(\w+\=\".*?\")|(\w+\=[^\,]*)`)
 
 // NewChallenge parses the www-authenticate header
@@ -48,6 +48,8 @@ func NewChallenge(wwwAuth string) (*Challenge, error) {
 			c.Stale = v
 		case "charset":
 			c.Charset = v
+		case "userhash":
+			c.Userhash = v
 		default:
 			return nil, ErrBadChallenge
 		}
