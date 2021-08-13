@@ -165,11 +165,11 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// copy the request so we dont modify the input.
-	cp := *req
-	cp.Body = ioutil.NopCloser(&body)
-	cp.Header = http.Header{}
+	copy := *req
+	copy.Body = ioutil.NopCloser(&body)
+	copy.Header = http.Header{}
 	for k, s := range req.Header {
-		cp.Header[k] = s
+		copy.Header[k] = s
 	}
 
 	// send the req and see if theres a challenge
@@ -190,13 +190,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// form credentials based on the challenge.
-	cr := t.NewCredentials(req.Method, req.URL.RequestURI(), body.String(), t.Cnoncer(), chal)
+	cr := t.NewCredentials(copy.Method, copy.URL.RequestURI(), body.String(), t.Cnoncer(), chal)
 	auth, err := cr.Authorization()
 	if err != nil {
 		return resp, err
 	}
 
 	// make authenticated request.
-	req.Header.Set("Authorization", auth)
-	return t.Transport.RoundTrip(req)
+	copy.Header.Set("Authorization", auth)
+	return t.Transport.RoundTrip(&copy)
 }

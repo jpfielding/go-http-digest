@@ -59,21 +59,21 @@ func (c *Credentials) a1() string {
 	return strings.Join(a1, ":")
 }
 
-func (c *Credentials) a2(method, uri, body string) string {
+func (c *Credentials) a2() string {
 	var a2 []string
-	a2 = append(a2, method)
-	a2 = append(a2, uri)
+	a2 = append(a2, c.Method)
+	a2 = append(a2, c.URI)
 	if strings.HasSuffix(c.Qop, "-int") {
 		h := c.Hasher()
-		a2 = append(a2, h(body))
+		a2 = append(a2, h(c.Body))
 	}
 	return strings.Join(a2, ":")
 }
 
-func (c *Credentials) resp() (string, error) {
+func (c *Credentials) response() (string, error) {
 	h := c.Hasher()
 	ha1 := h(c.a1())
-	ha2 := h(c.a2(c.Method, c.URI, c.Body))
+	ha2 := h(c.a2())
 	switch c.Qop {
 	case "auth", "auth-int":
 		var data []string
@@ -97,7 +97,7 @@ func (c *Credentials) Authorization() (string, error) {
 	if _, ok := Algs[strings.ToUpper(c.Algorithm)]; !ok {
 		return "", ErrAlgNotImplemented
 	}
-	resp, err := c.resp()
+	resp, err := c.response()
 	if err != nil {
 		return "", err
 	}
