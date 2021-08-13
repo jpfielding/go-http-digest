@@ -1,6 +1,7 @@
 package digest
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -30,9 +31,16 @@ type Credentials struct {
 	Cnonce string
 }
 
+type Hasher func(string) string
+
 func (c *Credentials) Hasher() Hasher {
 	alg := strings.ToUpper(strings.TrimSuffix(c.Algorithm, "-sess"))
-	return Algs[alg]
+	h := Algs[alg]
+	return func(data string) string {
+		h.Reset()
+		fmt.Fprint(h, data)
+		return hex.EncodeToString(h.Sum(nil))
+	}
 }
 
 func (c *Credentials) kd(secret, data string) string {

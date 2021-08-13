@@ -1,5 +1,3 @@
-// https://github.com/Sectorbob/mlab-ns2/blob/master/gae/ns/digest/digest.go
-// http://www.apache.org/licenses/LICENSE-2.0
 package digest
 
 import (
@@ -7,8 +5,10 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/ioutil"
 	"net"
@@ -16,9 +16,6 @@ import (
 	"sync"
 	"time"
 )
-
-// Hasher allows us to swap implementations (MD5, SHA-256... etc)
-type Hasher func(string) string
 
 // OopPref prefs implemented
 type QopPref func([]string) string
@@ -33,17 +30,12 @@ var (
 	ErrQopNotSupported   = errors.New("qop not supported")
 
 	// The Algs supported by this digester
-	Algs = map[string]Hasher{
-		"MD5": func(data string) string {
-			hf := md5.New()
-			io.WriteString(hf, data)
-			return fmt.Sprintf("%x", hf.Sum(nil))
-		},
-		"SHA-256": func(data string) string {
-			d := []byte(data)
-			h := sha256.Sum256(d)
-			return fmt.Sprintf("%x", h[:])
-		},
+	Algs = map[string]hash.Hash{
+		"":            md5.New(),
+		"MD5":         md5.New(),
+		"SHA-256":     sha256.New(),
+		"SHA-512":     sha512.New(),
+		"SHA-512-256": sha512.New512_256(),
 	}
 	QopFirst = func(qops []string) string {
 		for _, qop := range qops {
