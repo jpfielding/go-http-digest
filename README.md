@@ -7,7 +7,7 @@ package main
 
 import (
 	"net/http"
-    "os"
+    	"os"
 	"github.com/jpfielding/go-http-digest/pkg/digest"
 )
 
