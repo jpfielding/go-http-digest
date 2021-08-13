@@ -1,6 +1,5 @@
 # HTTP Digest Authentication
 
-
 [![GoDoc](https://godoc.org/github.com/jpfielding/go-http-digest?status.svg)](https://godoc.org/github.com/jpfielding/go-http-digest)
 
 
@@ -11,7 +10,7 @@ package main
 
 import (
 	"net/http"
-    "os"
+    	"os"
 	"github.com/jpfielding/go-http-digest/pkg/digest"
 )
 
@@ -21,7 +20,8 @@ func main() {
     dt := digest.NewTransport("user", "pwd", transport)
     client := dt.NewHTTPClient()
     client.Jar, _ = cookiejar.New(nil)
-    res, err := client.Get("https://cloud.mongodbgov.com/api/atlas/v1.0/groups/<proj>/clusters/<cluster-name>")
+    // SHA-256 requrired for mongodbgov.com
+    res, _err_ := client.Get("https://cloud.mongodbgov.com/api/atlas/v1.0/groups/<proj>/clusters/<cluster-name>")
     io.Copy(os.Stdout, res.Body)
     if err != nil {
         panic(err)
