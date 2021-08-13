@@ -7,7 +7,7 @@ import (
 	"net/http/cookiejar"
 	"os"
 
-	"go-http-digest/pkg/digest"
+	"github.com/jpfielding/go-http-digest/pkg/digest"
 
 	"github.com/jpfielding/gowirelog/wirelog"
 )
