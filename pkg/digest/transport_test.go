@@ -26,7 +26,7 @@ func TestAlgResponse(t *testing.T) {
 		trans := NewTransport("Mufasa", "Circle of Life", nil)
 		// Form credentials based on the challenge.
 		cr := trans.NewCredentials("GET", "/dir/index.html", "", cnonce, challenge)
-		response, err := cr.resp()
+		response, err := cr.response()
 		assert.Nil(t, err)
 		assert.Equal(t, resp, response)
 	}

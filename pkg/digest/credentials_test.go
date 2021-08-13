@@ -27,7 +27,7 @@ func TestResponse(t *testing.T) {
 			Method:     "GET",
 			URI:        "/dir/index.html",
 		}
-		response, err := creds.resp()
+		response, err := creds.response()
 		assert.Nil(t, err)
 		assert.Equal(t, resp, response)
 	}
