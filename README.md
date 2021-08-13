@@ -16,6 +16,7 @@ func main() {
     dt := digest.NewTransport("user", "pwd", transport)
     client := dt.NewHTTPClient()
     client.Jar, _ = cookiejar.New(nil)
+    // SHA-256 requrired for mongodbgov.com
     res, _err_ := client.Get("https://cloud.mongodbgov.com/api/atlas/v1.0/groups/<proj>/clusters/<cluster-name>")
     io.Copy(os.Stdout, res.Body)
     defer res.Body.Close()
