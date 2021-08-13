@@ -6,6 +6,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestNonceCounter(t *testing.T) {
+	trans := NewTransport("Mufasa", "Circle of Life", nil)
+
+	assert.Equal(t, 1, trans.Increment("mufasaaa!"))
+	assert.Equal(t, 1, trans.Increment("oooh! say it again!"))
+	assert.Equal(t, 2, trans.Increment("mufasaaa!"))
+	assert.Equal(t, 3, trans.Increment("mufasaaa!"))
+}
+
 func TestAlgResponse(t *testing.T) {
 	var cnonce = "f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ"
 	var responses = map[string]string{

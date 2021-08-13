@@ -82,7 +82,7 @@ func (t *Transport) NewHTTPClient() (*http.Client, error) {
 // NewTransport creates a new digest transport using the http.DefaultTransport.
 func NewTransport(username, password string, transport *http.Transport) *Transport {
 	if transport == nil {
-		transport = NewHTTPTransport()
+		transport = DefaultHTTPTransport()
 	}
 	return &Transport{
 		Username:     username,
@@ -90,13 +90,13 @@ func NewTransport(username, password string, transport *http.Transport) *Transpo
 		QopPref:      QopFirst,
 		Cnoncer:      Cnoncer16,
 		Transport:    transport,
-		NonceCounter: map[string]int{},
+		NonceCounter: map[string]int{}, // consider an lru to keep the size of this in check
 		ncLock:       &sync.Mutex{},
 	}
 }
 
 // NewHTTPTransport ...
-func NewHTTPTransport() *http.Transport {
+func DefaultHTTPTransport() *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{

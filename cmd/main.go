@@ -29,7 +29,7 @@ func (a *Args) Parse() {
 }
 
 func main() {
-	transport := digest.NewHTTPTransport()
+	transport := digest.DefaultHTTPTransport()
 	args := &Args{}
 	args.Parse()
 
