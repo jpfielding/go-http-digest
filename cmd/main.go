@@ -2,11 +2,12 @@ package main
 
 import (
 	"flag"
-	"go-http-digest/pkg/digest"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+
+	"go-http-digest/pkg/digest"
 
 	"github.com/jpfielding/gowirelog/wirelog"
 )
