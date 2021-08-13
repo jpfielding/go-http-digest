@@ -67,8 +67,8 @@ type Transport struct {
 	QopPref QopPref
 	// Cnoncer provides a seem for cnonce generation
 	Cnoncer Cnoncer
-	// ncLock mutex's our nonce counter
-	ncLock *sync.Mutex
+	// ncLock mutex's our nonce counter (private and zero init)
+	ncLock sync.Mutex
 }
 
 // NewHTTPClient returns an HTTP client that uses the digest transport.
@@ -91,7 +91,6 @@ func NewTransport(username, password string, transport *http.Transport) *Transpo
 		Cnoncer:      Cnoncer16,
 		Transport:    transport,
 		NonceCounter: map[string]int{}, // consider an lru to keep the size of this in check
-		ncLock:       &sync.Mutex{},
 	}
 }
 
