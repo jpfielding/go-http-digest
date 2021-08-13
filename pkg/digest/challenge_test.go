@@ -1,7 +1,6 @@
 package digest
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +11,6 @@ var rawChallenge = `Digest realm="http-auth@example.org", qop="auth,auth-int", a
 func TestParse(t *testing.T) {
 	c, err := NewChallenge(rawChallenge)
 	assert.Nil(t, err)
-	fmt.Printf("%s\n", c)
 	assert.Equal(t, "Digest", c.Scheme)
 	assert.Equal(t, "http-auth@example.org", c.Realm)
 	assert.Equal(t, "", c.Stale)
