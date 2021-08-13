@@ -1,5 +1,8 @@
 # HTTP Digest Authentication
 
+[![GoDoc](https://godoc.org/github.com/jpfielding/go-http-digest?status.svg)](https://godoc.org/github.com/jpfielding/go-http-digest)
+
+
 > Simple digest auth 
 
 ``` go
