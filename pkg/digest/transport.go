@@ -158,7 +158,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// cache req body (lets hope this isnt big or refactor)
 	var body bytes.Buffer
 	if req.Body != nil {
-		ioutil.ReadAll(req.Body)
+		io.Copy(&body, req.Body)
 		req.Body.Close()
 		req.Body = ioutil.NopCloser(&body)
 	}
