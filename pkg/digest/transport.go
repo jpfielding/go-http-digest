@@ -80,7 +80,7 @@ func (t *Transport) NewHTTPClient() (*http.Client, error) {
 }
 
 // NewTransport creates a new digest transport using the http.DefaultTransport.
-func NewTransport(username, password string, transport *http.Transport) *Transport {
+func NewTransport(username, password string, transport http.RoundTripper) *Transport {
 	if transport == nil {
 		transport = DefaultHTTPTransport()
 	}
@@ -149,7 +149,7 @@ func (t *Transport) NewCredentials(method, uri, body, cnonce string, c *Challeng
 	}
 }
 
-// RourdTrip sends our request and intercepts a 401
+// RoundTrip sends our request and intercepts a 401
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.Transport == nil {
 		return nil, ErrNilTransport
