@@ -165,9 +165,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// copy the request so we don't modify the input.
-	copy := *req
+	copy := req.Clone(req.Context())
 	copy.Body = io.NopCloser(&body)
-	copy.Header = req.Header.Clone()
 
 	// send the req and see if theres a challenge
 	resp, err := t.Transport.RoundTrip(req)
@@ -202,5 +201,5 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// make authenticated request.
 	copy.Header.Set("Authorization", auth)
-	return t.Transport.RoundTrip(&copy)
+	return t.Transport.RoundTrip(copy)
 }
