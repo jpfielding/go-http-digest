@@ -26,7 +26,6 @@ func (a *Args) Parse() {
 	flag.StringVar(&a.URL, "url", "", "the url to request")
 	flag.StringVar(&a.Wirelog, "wirelog", "", "the log file to see raw http")
 	flag.Parse()
-
 }
 
 func main() {
@@ -51,6 +50,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	io.Copy(os.Stdout, resp.Body)
-	resp.Body.Close()
+	if _, err := io.Copy(os.Stdout, resp.Body); err == nil {
+		_ = resp.Body.Close()
+	}
 }
