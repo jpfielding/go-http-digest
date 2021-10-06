@@ -10,7 +10,6 @@ import (
 	"errors"
 	"hash"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"sync"
@@ -21,7 +20,7 @@ import (
 type QopPref func([]string) string
 
 // Cnoncer generates a cnonce
-type Cnoncer func() string
+type Cnoncer func() (string, error)
 
 var (
 	ErrNilTransport      = errors.New("transport is nil")
@@ -43,10 +42,10 @@ var (
 		}
 		return ""
 	}
-	Cnoncer16 = func() string {
+	Cnoncer16 = func() (string, error) {
 		b := make([]byte, 16)
-		io.ReadFull(rand.Reader, b)
-		return hex.EncodeToString(b)
+		_, err := io.ReadFull(rand.Reader, b)
+		return hex.EncodeToString(b), err
 	}
 )
 
@@ -80,7 +79,7 @@ func (t *Transport) NewHTTPClient() (*http.Client, error) {
 }
 
 // NewTransport creates a new digest transport using the http.DefaultTransport.
-func NewTransport(username, password string, transport *http.Transport) *Transport {
+func NewTransport(username, password string, transport http.RoundTripper) *Transport {
 	if transport == nil {
 		transport = DefaultHTTPTransport()
 	}
@@ -149,7 +148,7 @@ func (t *Transport) NewCredentials(method, uri, body, cnonce string, c *Challeng
 	}
 }
 
-// RourdTrip sends our request and intercepts a 401
+// RoundTrip sends our request and intercepts a 401
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.Transport == nil {
 		return nil, ErrNilTransport
@@ -158,18 +157,16 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// cache req body (lets hope this isnt big or refactor)
 	var body bytes.Buffer
 	if req.Body != nil {
-		io.Copy(&body, req.Body)
+		if _, err := io.Copy(&body, req.Body); err != nil {
+			return nil, err
+		}
 		req.Body.Close()
-		req.Body = ioutil.NopCloser(&body)
+		req.Body = io.NopCloser(&body)
 	}
 
-	// copy the request so we dont modify the input.
-	copy := *req
-	copy.Body = ioutil.NopCloser(&body)
-	copy.Header = http.Header{}
-	for k, s := range req.Header {
-		copy.Header[k] = s
-	}
+	// copy the request so we don't modify the input.
+	copy := req.Clone(req.Context())
+	copy.Body = io.NopCloser(bytes.NewBuffer(body.Bytes()))
 
 	// send the req and see if theres a challenge
 	resp, err := t.Transport.RoundTrip(req)
@@ -178,8 +175,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// drain and close the connection
-	io.Copy(ioutil.Discard, resp.Body)
-	resp.Body.Close()
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return resp, err
+	}
+	_ = resp.Body.Close()
 
 	// accept/reject the challenge
 	wwwAuth := resp.Header.Get("WWW-Authenticate")
@@ -189,7 +188,12 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// form credentials based on the challenge.
-	cr := t.NewCredentials(copy.Method, copy.URL.RequestURI(), body.String(), t.Cnoncer(), chal)
+	cnonce, err := t.Cnoncer()
+	if err != nil {
+		return resp, err
+	}
+
+	cr := t.NewCredentials(copy.Method, copy.URL.RequestURI(), body.String(), cnonce, chal)
 	auth, err := cr.Authorization()
 	if err != nil {
 		return resp, err
@@ -197,5 +201,5 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// make authenticated request.
 	copy.Header.Set("Authorization", auth)
-	return t.Transport.RoundTrip(&copy)
+	return t.Transport.RoundTrip(copy)
 }
