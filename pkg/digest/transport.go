@@ -182,6 +182,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	// accept/reject the challenge
 	wwwAuth := resp.Header.Get("WWW-Authenticate")
+	if wwwAuth == "" {
+		// fall back to non-standard header that some servers use to avoid browser popups
+		wwwAuth = resp.Header.Get("X-WWW-Authenticate")
+	}
 	chal, err := NewChallenge(wwwAuth)
 	if err != nil {
 		return resp, err
