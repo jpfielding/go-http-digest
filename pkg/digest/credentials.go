@@ -37,9 +37,21 @@ type Credentials struct {
 
 type Hasher func(string) string
 
+// baseAlg returns the algorithm name with any "-sess" suffix stripped
+// and the scheme uppercased, matching the keys in the Algs map.
+func (c *Credentials) baseAlg() string {
+	return strings.TrimSuffix(strings.ToUpper(c.Algorithm), "-SESS")
+}
+
+// isSess reports whether the algorithm uses session-keyed HA1 per
+// RFC 7616 §3.4.2.
+func (c *Credentials) isSess() bool {
+	return strings.HasSuffix(strings.ToUpper(c.Algorithm), "-SESS")
+}
+
 func (c *Credentials) Hasher() Hasher {
+	alg := c.baseAlg()
 	return func(data string) string {
-		alg := strings.ToUpper(strings.TrimSuffix(c.Algorithm, "-sess"))
 		h := Algs[alg]() // create the hash.Hash to avoid sharing
 		h.Reset()
 		fmt.Fprint(h, data)
@@ -51,16 +63,20 @@ func (c *Credentials) kd(secret, data string) string {
 	return fmt.Sprintf("%s:%s", secret, data)
 }
 
-func (c *Credentials) a1() string {
-	var a1 []string
-	a1 = append(a1, c.Username)
-	a1 = append(a1, c.Realm)
-	a1 = append(a1, c.Password)
-	if strings.HasSuffix(c.Algorithm, "-sess") {
-		a1 = append(a1, c.NoncePrime)
-		a1 = append(a1, c.CnoncePrime)
+// ha1 computes the HA1 value per RFC 7616 §3.4.2.
+//
+//	HA1       = H( unq(username) ":" unq(realm) ":" passwd )
+//	HA1-sess  = H( H(unq(username) ":" unq(realm) ":" passwd)
+//	               ":" unq(nonce-prime) ":" unq(cnonce-prime) )
+//
+// The -sess form is a nested hash: H(H(...):nonce-prime:cnonce-prime).
+func (c *Credentials) ha1() string {
+	h := c.Hasher()
+	base := h(strings.Join([]string{c.Username, c.Realm, c.Password}, ":"))
+	if c.isSess() {
+		return h(strings.Join([]string{base, c.NoncePrime, c.CnoncePrime}, ":"))
 	}
-	return strings.Join(a1, ":")
+	return base
 }
 
 func (c *Credentials) a2() string {
@@ -76,7 +92,7 @@ func (c *Credentials) a2() string {
 
 func (c *Credentials) response() (string, error) {
 	h := c.Hasher()
-	ha1 := h(c.a1())
+	ha1 := c.ha1()
 	ha2 := h(c.a2())
 	switch c.Qop {
 	case "auth", "auth-int":
@@ -98,7 +114,7 @@ func (c *Credentials) response() (string, error) {
 }
 
 func (c *Credentials) Authorization() (string, error) {
-	if _, ok := Algs[strings.ToUpper(c.Algorithm)]; !ok {
+	if _, ok := Algs[c.baseAlg()]; !ok {
 		return "", ErrAlgNotImplemented
 	}
 	resp, err := c.response()
