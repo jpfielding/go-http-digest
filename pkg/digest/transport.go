@@ -71,12 +71,11 @@ type Transport struct {
 	nonces *nonceStore
 }
 
-// NewHTTPClient returns an HTTP client that uses the digest transport.
-func (t *Transport) NewHTTPClient() (*http.Client, error) {
-	if t.Transport == nil {
-		return nil, ErrNilTransport
-	}
-	return &http.Client{Transport: t}, nil
+// Client returns an *http.Client that uses this Transport as its RoundTripper.
+// Callers typically attach a cookie jar, set a Timeout, etc. on the returned
+// client before use.
+func (t *Transport) Client() *http.Client {
+	return &http.Client{Transport: t}
 }
 
 // NewTransport creates a new digest transport using the http.DefaultTransport.
@@ -94,7 +93,9 @@ func NewTransport(username, password string, transport http.RoundTripper) *Trans
 	}
 }
 
-// DefaultHTTPTransport returns an http.Transport with stdlib-default settings.
+// DefaultHTTPTransport returns an *http.Transport pre-configured with the
+// stdlib defaults. It is a convenience for callers who want a transport they
+// can modify (e.g. custom TLS, proxy) before handing it to NewTransport.
 func DefaultHTTPTransport() *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
