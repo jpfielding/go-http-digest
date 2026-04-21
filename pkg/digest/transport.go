@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -181,6 +182,29 @@ func readChallenge(h http.Header) (*Challenge, error) {
 	return NewChallenge(wwwAuth)
 }
 
+// digestSchemeRE matches the "Digest" auth-scheme token when it appears at
+// the start of a challenge list or after a comma separator (RFC 7235 allows
+// multiple challenges in one header, e.g. `Basic realm="x", Digest realm="y"`).
+var digestSchemeRE = regexp.MustCompile(`(?i)(?:^|,)\s*Digest(?:\s|$)`)
+
+// hasDigestScheme reports whether any WWW-Authenticate (or X-WWW-Authenticate
+// fallback) header value actually advertises the Digest scheme. Servers that
+// return 401 without a WWW-Authenticate header at all, or that offer only
+// non-Digest schemes (Basic, Bearer, NTLM), leave nothing for this transport
+// to answer.
+func hasDigestScheme(h http.Header) bool {
+	values := h.Values("WWW-Authenticate")
+	if len(values) == 0 {
+		values = h.Values("X-WWW-Authenticate")
+	}
+	for _, v := range values {
+		if digestSchemeRE.MatchString(v) {
+			return true
+		}
+	}
+	return false
+}
+
 // RoundTrip implements http.RoundTripper. It issues the request; on a 401 it
 // parses the challenge, constructs digest credentials, and retries with an
 // Authorization header. Retries once more if the server returns stale=true.
@@ -225,6 +249,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, bodyBytes, err := attempt("")
 	if err != nil || resp.StatusCode != http.StatusUnauthorized {
 		return resp, err
+	}
+
+	// A 401 without a Digest challenge is not ours to answer. Return the
+	// response to the caller unchanged rather than emitting a second
+	// request with empty/garbage credentials (fixes #6).
+	if !hasDigestScheme(resp.Header) {
+		return resp, nil
 	}
 
 	// Authenticated attempts (initial + optional stale retry).

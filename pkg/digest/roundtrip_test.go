@@ -177,3 +177,106 @@ func mustGet(t *testing.T, url string) *http.Request {
 	require.NoError(t, err)
 	return req
 }
+
+// TestRoundTripNoDigestChallenge covers issue #6: when a 401 response carries
+// no WWW-Authenticate header (or only non-Digest schemes), the transport must
+// return the 401 to the caller as-is instead of emitting a second request
+// with empty/garbage digest credentials.
+func TestRoundTripNoDigestChallenge(t *testing.T) {
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{
+			name: "no WWW-Authenticate header at all",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+			},
+		},
+		{
+			name: "only Basic scheme offered",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="secure"`)
+				w.WriteHeader(http.StatusUnauthorized)
+			},
+		},
+		{
+			name: "only Bearer scheme offered",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="api"`)
+				w.WriteHeader(http.StatusUnauthorized)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&requests, 1)
+				// Guard: if the client attempts a second request it MUST NOT
+				// carry an Authorization header — if it does, the bug is live.
+				if r.Header.Get("Authorization") != "" {
+					t.Errorf("unexpected second request with Authorization=%q", r.Header.Get("Authorization"))
+				}
+				tc.handler(w, r)
+			}))
+			defer srv.Close()
+
+			trans := NewTransport("u", "p", http.DefaultTransport)
+			resp, err := trans.RoundTrip(mustGet(t, srv.URL))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+				"caller must see the original 401")
+			assert.Equal(t, int32(1), atomic.LoadInt32(&requests),
+				"transport must not issue a second request when there is no Digest challenge")
+		})
+	}
+}
+
+// TestRoundTripMultiSchemeChallenge covers the case where the server lists
+// multiple challenges in one WWW-Authenticate header (RFC 7235 §4.1). If any
+// of the offered schemes is Digest, we should still authenticate.
+func TestRoundTripMultiSchemeChallenge(t *testing.T) {
+	srv := &digestServer{
+		challenge: `Basic realm="other", Digest realm="r", qop="auth", algorithm=MD5, nonce="n1"`,
+	}
+	ts := newTestServer(t, srv)
+	defer ts.Close()
+
+	trans := NewTransport("u", "p", http.DefaultTransport)
+	resp, err := trans.RoundTrip(mustGet(t, ts.URL))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, srv.seenAuth, 2)
+	assert.Contains(t, srv.seenAuth[1], "Digest ")
+}
+
+func TestHasDigestScheme(t *testing.T) {
+	cases := []struct {
+		header string
+		want   bool
+	}{
+		{"", false},
+		{`Basic realm="x"`, false},
+		{`Bearer realm="api"`, false},
+		{`Digest realm="r", nonce="n"`, true},
+		{`digest realm="r"`, true}, // case-insensitive
+		{`DIGEST realm="r"`, true}, // all-caps
+		{`Basic realm="x", Digest realm="y"`, true},
+		{`NTLM`, false},
+		{`Digests realm="r"`, false}, // not the scheme token
+		{`XDigest`, false},           // not preceded by start/comma
+	}
+	for _, tc := range cases {
+		h := http.Header{}
+		if tc.header != "" {
+			h.Set("WWW-Authenticate", tc.header)
+		}
+		assert.Equal(t, tc.want, hasDigestScheme(h), "header=%q", tc.header)
+	}
+}
