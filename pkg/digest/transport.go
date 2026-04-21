@@ -12,10 +12,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
-// OopPref prefs implemented
+// QopPref prefs implemented
 type QopPref func([]string) string
 
 // Cnoncer generates a cnonce
@@ -48,6 +49,11 @@ var (
 	}
 )
 
+// maxAuthAttempts bounds the authenticated retries after the initial 401.
+// One attempt for the normal challenge/response round, plus one more if the
+// server returns 401 with stale=true.
+const maxAuthAttempts = 2
+
 // Transport is an implementation of http.RoundTripper that takes care of http
 // digest authentication.
 type Transport struct {
@@ -55,17 +61,13 @@ type Transport struct {
 	Password  string
 	Transport http.RoundTripper
 
-	// NoncePrime is for session keying 'MD5-sess'
-	NoncePrime string
-	// CnoncePrime is for session keying 'MD5-sess'
-	CnoncePrime string
-	// QopPref provides a seam for qop selection
+	// QopPref provides a seam for qop selection.
 	QopPref QopPref
-	// Cnoncer provides a seam for cnonce generation
+	// Cnoncer provides a seam for cnonce generation.
 	Cnoncer Cnoncer
 
 	// nonces is a bounded LRU+TTL map tracking the nc value for each nonce.
-	// Exposed via Increment / NonceCount / NonceCount.Size.
+	// Exposed via Increment / NonceCount / TrackedNonces.
 	nonces *nonceStore
 }
 
@@ -92,7 +94,7 @@ func NewTransport(username, password string, transport http.RoundTripper) *Trans
 	}
 }
 
-// NewHTTPTransport ...
+// DefaultHTTPTransport returns an http.Transport with stdlib-default settings.
 func DefaultHTTPTransport() *http.Transport {
 	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -133,15 +135,21 @@ func (t *Transport) TrackedNonces() int {
 	return t.nonces.size()
 }
 
-// NewCredentials ...
-func (t *Transport) NewCredentials(method, uri, body, cnonce string, c *Challenge) *Credentials {
-	// store these for the life of the transport
-	if t.NoncePrime == "" {
-		t.NoncePrime = c.Nonce
+// resetNonce removes the given nonce from the counter so the next Increment
+// starts at 1. Used when a server responds stale=true.
+func (t *Transport) resetNonce(nonce string) {
+	if t.nonces == nil {
+		return
 	}
-	if t.CnoncePrime == "" {
-		t.CnoncePrime = cnonce
-	}
+	t.nonces.reset(nonce)
+}
+
+// NewCredentials constructs the per-request Credentials for a given challenge.
+// For -sess algorithms, the nonce and cnonce of THIS challenge are used as
+// the sess inputs (nonce-prime, cnonce-prime). RFC 7616 §3.4.4 allows any
+// previous nonce/cnonce pair; using the current pair keeps each challenge
+// self-contained and avoids cross-server contamination.
+func (t *Transport) NewCredentials(method, uri string, body []byte, cnonce string, c *Challenge) *Credentials {
 	return &Credentials{
 		Username:    t.Username,
 		Password:    t.Password,
@@ -150,73 +158,165 @@ func (t *Transport) NewCredentials(method, uri, body, cnonce string, c *Challeng
 		Opaque:      c.Opaque,
 		Qop:         t.QopPref(c.Qop),
 		Userhash:    c.UserhashRequested(),
-		NoncePrime:  t.NoncePrime,
-		CnoncePrime: t.CnoncePrime,
+		NoncePrime:  c.Nonce,
+		CnoncePrime: cnonce,
 		Nonce:       c.Nonce,
 		NonceCount:  t.Increment(c.Nonce),
 		Cnonce:      cnonce,
 		Method:      method,
 		URI:         uri,
-		Body:        body,
+		Body:        string(body),
 	}
 }
 
-// RoundTrip sends our request and intercepts a 401
+// readChallenge pulls the digest challenge from either the standard header or
+// the non-standard X-WWW-Authenticate that some servers use to avoid browser
+// auth popups.
+func readChallenge(h http.Header) (*Challenge, error) {
+	wwwAuth := h.Get("WWW-Authenticate")
+	if wwwAuth == "" {
+		wwwAuth = h.Get("X-WWW-Authenticate")
+	}
+	return NewChallenge(wwwAuth)
+}
+
+// RoundTrip implements http.RoundTripper. It issues the request; on a 401 it
+// parses the challenge, constructs digest credentials, and retries with an
+// Authorization header. Retries once more if the server returns stale=true.
+//
+// The caller's *http.Request and its Body are NEVER mutated. Each attempt
+// uses a clone of the request with a freshly-sourced body. For requests with
+// a non-nil Body, bodies are sourced from req.GetBody when provided; otherwise
+// the body is buffered once on entry so it can be replayed on the retry.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.Transport == nil {
 		return nil, ErrNilTransport
 	}
 
-	// cache req body (lets hope this isnt big or refactor)
-	var body bytes.Buffer
-	if req.Body != nil {
-		if _, err := io.Copy(&body, req.Body); err != nil {
-			return nil, err
+	// Source bodies for each attempt without mutating req.
+	bodySrc, err := newBodySource(req)
+	if err != nil {
+		return nil, err
+	}
+
+	attempt := func(authHeader string) (*http.Response, []byte, error) {
+		clone := req.Clone(req.Context())
+		bodyRC, bodyBytes, err := bodySrc.next()
+		if err != nil {
+			return nil, nil, err
 		}
-		req.Body.Close()
-		req.Body = io.NopCloser(&body)
+		if bodyRC != nil {
+			clone.Body = bodyRC
+			clone.ContentLength = int64(len(bodyBytes))
+		}
+		if authHeader != "" {
+			// Clone defensively; req.Clone already shallow-copies headers
+			// but Set on a shared slice would still be unsafe under some
+			// stdlib internals paths.
+			clone.Header = clone.Header.Clone()
+			clone.Header.Set("Authorization", authHeader)
+		}
+		resp, err := t.Transport.RoundTrip(clone)
+		return resp, bodyBytes, err
 	}
 
-	// copy the request so we don't modify the input.
-	copy := req.Clone(req.Context())
-	copy.Body = io.NopCloser(bytes.NewBuffer(body.Bytes()))
-
-	// send the req and see if theres a challenge
-	resp, err := t.Transport.RoundTrip(req)
-	if err != nil || resp.StatusCode != 401 {
+	// Initial unauthenticated request.
+	resp, bodyBytes, err := attempt("")
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
 		return resp, err
 	}
 
-	// drain and close the connection
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return resp, err
-	}
-	_ = resp.Body.Close()
+	// Authenticated attempts (initial + optional stale retry).
+	for i := 0; i < maxAuthAttempts; i++ {
+		if _, e := io.Copy(io.Discard, resp.Body); e != nil {
+			return resp, e
+		}
+		_ = resp.Body.Close()
 
-	// accept/reject the challenge
-	wwwAuth := resp.Header.Get("WWW-Authenticate")
-	if wwwAuth == "" {
-		// fall back to non-standard header that some servers use to avoid browser popups
-		wwwAuth = resp.Header.Get("X-WWW-Authenticate")
+		chal, err := readChallenge(resp.Header)
+		if err != nil {
+			return resp, err
+		}
+
+		cnonce, err := t.Cnoncer()
+		if err != nil {
+			return resp, err
+		}
+
+		cr := t.NewCredentials(req.Method, req.URL.RequestURI(), bodyBytes, cnonce, chal)
+		authHeader, err := cr.Authorization()
+		if err != nil {
+			return resp, err
+		}
+
+		resp, bodyBytes, err = attempt(authHeader)
+		if err != nil {
+			return resp, err
+		}
+		if resp.StatusCode != http.StatusUnauthorized {
+			return resp, nil
+		}
+
+		// 401 again — retry only if the server explicitly says stale=true.
+		nextChal, err := readChallenge(resp.Header)
+		if err != nil || !strings.EqualFold(nextChal.Stale, "true") {
+			return resp, nil
+		}
+		// The old nonce is burned; evict it so the next attempt starts at
+		// nc=1 for whatever new nonce arrives.
+		t.resetNonce(chal.Nonce)
 	}
-	chal, err := NewChallenge(wwwAuth)
+
+	return resp, nil
+}
+
+// bodySource produces fresh io.ReadCloser + raw byte views of a request body
+// for each attempt, without mutating the caller's *http.Request.
+type bodySource struct {
+	req      *http.Request
+	buffered []byte // used when req.GetBody is nil
+	hasBody  bool
+}
+
+func newBodySource(req *http.Request) (*bodySource, error) {
+	bs := &bodySource{req: req}
+	if req.Body == nil || req.Body == http.NoBody {
+		return bs, nil
+	}
+	bs.hasBody = true
+	if req.GetBody != nil {
+		// No buffering needed; GetBody re-creates the reader on demand.
+		return bs, nil
+	}
+	// Fall back to a one-time buffer of the original body. This is the only
+	// case where we read from req.Body — but we do NOT replace req.Body or
+	// close it in-place, so the caller's request object is left alone.
+	b, err := io.ReadAll(req.Body)
 	if err != nil {
-		return resp, err
+		return nil, err
 	}
+	_ = req.Body.Close()
+	bs.buffered = b
+	return bs, nil
+}
 
-	// form credentials based on the challenge.
-	cnonce, err := t.Cnoncer()
-	if err != nil {
-		return resp, err
+// next returns a fresh ReadCloser and the underlying bytes (for auth-int
+// hashing). Returns (nil, nil, nil) when the request has no body.
+func (b *bodySource) next() (io.ReadCloser, []byte, error) {
+	if !b.hasBody {
+		return nil, nil, nil
 	}
-
-	cr := t.NewCredentials(copy.Method, copy.URL.RequestURI(), body.String(), cnonce, chal)
-	auth, err := cr.Authorization()
-	if err != nil {
-		return resp, err
+	if b.req.GetBody != nil {
+		rc, err := b.req.GetBody()
+		if err != nil {
+			return nil, nil, err
+		}
+		raw, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return io.NopCloser(bytes.NewReader(raw)), raw, nil
 	}
-
-	// make authenticated request.
-	copy.Header.Set("Authorization", auth)
-	return t.Transport.RoundTrip(copy)
+	return io.NopCloser(bytes.NewReader(b.buffered)), b.buffered, nil
 }
