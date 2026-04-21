@@ -137,6 +137,7 @@ func (t *Transport) NewCredentials(method, uri, body, cnonce string, c *Challeng
 		Algorithm:   c.Algorithm,
 		Opaque:      c.Opaque,
 		Qop:         t.QopPref(c.Qop),
+		Userhash:    c.UserhashRequested(),
 		NoncePrime:  t.NoncePrime,
 		CnoncePrime: t.CnoncePrime,
 		Nonce:       c.Nonce,
