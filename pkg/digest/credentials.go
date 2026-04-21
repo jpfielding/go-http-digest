@@ -19,6 +19,10 @@ type Credentials struct {
 	Opaque     string
 	Qop        string // the chosen auth from the server list
 	Algorithm  string // <alg>-sess implies session-keying ()
+	// Userhash mirrors the challenge's userhash=true flag. When set, the
+	// Authorization header emits username=H(unq(username):unq(realm)) and
+	// userhash=true instead of the cleartext username (RFC 7616 §3.4.4).
+	Userhash bool
 
 	// session-keying
 	CnoncePrime string
@@ -102,7 +106,12 @@ func (c *Credentials) Authorization() (string, error) {
 		return "", err
 	}
 	var auth []string
-	auth = append(auth, fmt.Sprintf(`username="%s"`, c.Username))
+	username := c.Username
+	if c.Userhash {
+		h := c.Hasher()
+		username = h(c.Username + ":" + c.Realm)
+	}
+	auth = append(auth, fmt.Sprintf(`username="%s"`, username))
 	auth = append(auth, fmt.Sprintf(`realm="%s"`, c.Realm))
 	auth = append(auth, fmt.Sprintf(`nonce="%s"`, c.Nonce))
 	auth = append(auth, fmt.Sprintf(`uri="%s"`, c.URI))
@@ -117,6 +126,9 @@ func (c *Credentials) Authorization() (string, error) {
 	auth = append(auth, fmt.Sprintf(`response="%s"`, resp))
 	if c.Algorithm != "" {
 		auth = append(auth, fmt.Sprintf(`algorithm=%s`, c.Algorithm))
+	}
+	if c.Userhash {
+		auth = append(auth, `userhash=true`)
 	}
 	return fmt.Sprintf("Digest %s", strings.Join(auth, ", ")), nil
 }

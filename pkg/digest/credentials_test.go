@@ -1,6 +1,7 @@
 package digest
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,4 +34,39 @@ func TestResponse(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, resp, response)
 	}
+}
+
+// TestAuthorizationUserhash verifies that when Userhash is set, the emitted
+// username directive carries H(user:realm) and userhash=true is appended,
+// per RFC 7616 §3.4.4.
+func TestAuthorizationUserhash(t *testing.T) {
+	creds := Credentials{
+		Username:   "Mufasa",
+		Password:   "Circle of Life",
+		Realm:      "http-auth@example.org",
+		Algorithm:  "SHA-256",
+		Nonce:      "n",
+		NonceCount: 1,
+		Cnonce:     "c",
+		Qop:        "auth",
+		Method:     "GET",
+		URI:        "/",
+		Userhash:   true,
+	}
+	auth, err := creds.Authorization()
+	assert.Nil(t, err)
+	assert.NotContains(t, auth, `username="Mufasa"`,
+		"cleartext username must not appear when userhash is set")
+	assert.Contains(t, auth, `userhash=true`,
+		"userhash=true must be advertised in the Authorization header")
+	// The emitted username value should be the 64-char SHA-256 hex of
+	// "Mufasa:http-auth@example.org".
+	assert.Regexp(t, `username="[0-9a-f]{64}"`, auth)
+
+	// And without Userhash, the cleartext form should still be used.
+	creds.Userhash = false
+	auth2, err := creds.Authorization()
+	assert.Nil(t, err)
+	assert.Contains(t, auth2, `username="Mufasa"`)
+	assert.False(t, strings.Contains(auth2, `userhash=true`))
 }
