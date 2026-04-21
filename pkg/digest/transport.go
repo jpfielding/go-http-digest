@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -60,14 +59,14 @@ type Transport struct {
 	NoncePrime string
 	// CnoncePrime is for session keying 'MD5-sess'
 	CnoncePrime string
-	// NonCounter tracks the count of all nonces we've sent a request for
-	NonceCounter map[string]int
-	// QopPref provides a seem for qop selection
+	// QopPref provides a seam for qop selection
 	QopPref QopPref
-	// Cnoncer provides a seem for cnonce generation
+	// Cnoncer provides a seam for cnonce generation
 	Cnoncer Cnoncer
-	// ncLock mutex's our nonce counter (private and zero init)
-	ncLock sync.Mutex
+
+	// nonces is a bounded LRU+TTL map tracking the nc value for each nonce.
+	// Exposed via Increment / NonceCount / NonceCount.Size.
+	nonces *nonceStore
 }
 
 // NewHTTPClient returns an HTTP client that uses the digest transport.
@@ -84,12 +83,12 @@ func NewTransport(username, password string, transport http.RoundTripper) *Trans
 		transport = DefaultHTTPTransport()
 	}
 	return &Transport{
-		Username:     username,
-		Password:     password,
-		QopPref:      QopFirst,
-		Cnoncer:      Cnoncer16,
-		Transport:    transport,
-		NonceCounter: map[string]int{}, // consider an lru to keep the size of this in check
+		Username:  username,
+		Password:  password,
+		QopPref:   QopFirst,
+		Cnoncer:   Cnoncer16,
+		Transport: transport,
+		nonces:    newNonceStore(DefaultNonceCapacity, DefaultNonceTTL),
 	}
 }
 
@@ -109,16 +108,29 @@ func DefaultHTTPTransport() *http.Transport {
 	}
 }
 
-// Increment tracks the count of the given nonce
+// Increment bumps and returns the nc for the given nonce.
 func (t *Transport) Increment(nonce string) int {
-	t.ncLock.Lock()
-	defer t.ncLock.Unlock()
-	if _, ok := t.NonceCounter[nonce]; !ok {
-		t.NonceCounter[nonce] = 0
+	if t.nonces == nil {
+		t.nonces = newNonceStore(DefaultNonceCapacity, DefaultNonceTTL)
 	}
-	nc := t.NonceCounter[nonce] + 1
-	t.NonceCounter[nonce] = nc
-	return nc
+	return t.nonces.increment(nonce)
+}
+
+// NonceCount returns the current nc for the given nonce, or 0 if the nonce
+// is not tracked. Does not update recency.
+func (t *Transport) NonceCount(nonce string) int {
+	if t.nonces == nil {
+		return 0
+	}
+	return t.nonces.count(nonce)
+}
+
+// TrackedNonces reports the number of nonces currently in the counter.
+func (t *Transport) TrackedNonces() int {
+	if t.nonces == nil {
+		return 0
+	}
+	return t.nonces.size()
 }
 
 // NewCredentials ...

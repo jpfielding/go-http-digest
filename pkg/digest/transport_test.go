@@ -13,7 +13,10 @@ func TestNonceCounter(t *testing.T) {
 	assert.Equal(t, 1, trans.Increment("oooh! say it again!"))
 	assert.Equal(t, 2, trans.Increment("mufasaaa!"))
 	assert.Equal(t, 3, trans.Increment("mufasaaa!"))
-	assert.Equal(t, 2, len(trans.NonceCounter))
+	assert.Equal(t, 2, trans.TrackedNonces())
+	assert.Equal(t, 3, trans.NonceCount("mufasaaa!"))
+	assert.Equal(t, 1, trans.NonceCount("oooh! say it again!"))
+	assert.Equal(t, 0, trans.NonceCount("never seen"))
 }
 
 func TestAlgResponse(t *testing.T) {
